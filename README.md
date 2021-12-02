@@ -3,6 +3,8 @@ Various modding tools & research for Resident Evil 4.
 
 * **re4lfs.cpp** - (un)packer for RE4 LFS files, allowing you to compress your modded RE4 data to as little as 5% the size in best case!
 
+* **re4resample.cpp** - tool for extracting & resampling XWB files used by RE4 (resampling low-sample-rate audio to a higher rate should improve any HRTF effects mixed into the audio)
+
 * **re4sym.cpp** - parser for SYM files included with the RE4 GC debug build, allows exporting the SYM as both IDA & Ghidra scripts
 
 * **prodg-rel.py** - IDAPython loader for PS2 "SN ProDG relocatable DLL" files, as used by the RE4 PS2 versions, will automatically name functions with whatever symbols are available in the REL.
