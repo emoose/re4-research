@@ -2,7 +2,7 @@
 # These files begin with a SNR2 (SN Relocatable?) header, followed by lists of exported symbol names/addresses
 # (likely contains info about relocation too, and imports from the main module & other DLLs, but those aren't implemented here yet)
 
-# Sadly the exported symbols only cover a very small amount of the code - likely just the symbols that main & other modules might access
+# Sadly the exported symbols only cover a very small amount of the code - likely only the symbols that main & other modules might access
 # (the main module of the game also contains a SNR2 header with exported symbols, but again only covers certain parts of the code, too bad)
 # Tested with IDA 7.6 & REL files extracted from PS2 version of Biohazard 4 (JP) bio4dat.afs
 
@@ -45,11 +45,11 @@ MyStructure.__str__ = StructAsString
 class SNR2Header(MyStructure):
   _fields_ = [
     ("Magic", uint32_t),
-    ("Table1Offset", uint32_t),
-    ("Table1Count", uint32_t),
-    ("Table2Offset", uint32_t),
-    ("Table2Count", uint32_t),
-    ("ImagePathAddress", uint32_t),
+    ("RelocTableAddress", uint32_t),
+    ("RelocTableCount", uint32_t),
+    ("FuncTableAddress", uint32_t),
+    ("FuncTableCount", uint32_t),
+    ("OriginalImageNameAddress", uint32_t),
     ("GlobalCtorsAddress", uint32_t),
     ("GlobalDtorsAddress", uint32_t),
     ("ExportsAddress", uint32_t),
@@ -58,14 +58,25 @@ class SNR2Header(MyStructure):
     ("FileSize", uint32_t),
     ("Unk30", uint32_t),
     ("UnkAddr34", uint32_t),
-    ("UnkAddr38", uint32_t),
-    ("Pad3C", uint32_t),
+    ("UnkAddr38", uint32_t)
   ]
-  
-class SNR2Table2Entry(MyStructure):
+
+class SNR2Relocation(MyStructure):
+  _pack_ = 1
   _fields_ = [
-    ("NameOffset", uint32_t),
-    ("CodeOffset", uint32_t),
+    ("CodeAddress", uint32_t),
+    ("RelocType", uint8_t),
+    ("FunctionIdx", uint16_t),
+    ("Unk7", uint16_t),
+    ("Unk9", uint8_t),
+    ("UnkA", uint8_t),
+    ("UnkB", uint8_t),
+  ]
+
+class SNR2Function(MyStructure):
+  _fields_ = [
+    ("NameAddress", uint32_t),
+    ("CodeAddress", uint32_t),
     ("Unk8", uint16_t),
     ("Type", uint8_t),
     ("UnkB", uint8_t),
@@ -82,9 +93,7 @@ def read_struct(li, struct):
 def accept_file(li, n):
   li.seek(0)
   magic = li.read(4)
-  print(magic)
   if magic == bytes(_MAGIC_SNR2, 'utf-8'):
-    print("OKAY")
     return _FORMAT_SNR2
 
   return 0
@@ -119,45 +128,55 @@ def load_file(li, neflags, format):
   snr_header = read_struct(li, SNR2Header)
   
   # header doesn't actually specify where code/data starts & ends, so we need to try working it our ourselves...
-  sndata_ext_addr = snr_header.ImagePathAddress
-  if sndata_ext_addr == 0 or sndata_ext_addr > snr_header.Table1Offset:
-    sndata_ext_addr = snr_header.Table1Offset
-  if sndata_ext_addr == 0 or sndata_ext_addr > snr_header.Table2Offset:
-    sndata_ext_addr = snr_header.Table2Offset
+  sndata_ext_addr = snr_header.OriginalImageNameAddress
+  if sndata_ext_addr == 0 or sndata_ext_addr > snr_header.RelocTableAddress:
+    sndata_ext_addr = snr_header.RelocTableAddress
+  if sndata_ext_addr == 0 or sndata_ext_addr > snr_header.FuncTableAddress:
+    sndata_ext_addr = snr_header.FuncTableAddress
   
-  li.seek(snr_header.Table2Offset)
+  li.seek(snr_header.FuncTableAddress)
   
-  table2 = []
-  for i in range(0, snr_header.Table2Count):
-    entry = read_struct(li, SNR2Table2Entry)
-    table2.append(entry)
-    if sndata_ext_addr == 0 or sndata_ext_addr > entry.NameOffset:
-      sndata_ext_addr = entry.NameOffset
-    
+  funcs = []
+  for i in range(0, snr_header.FuncTableCount):
+    entry = read_struct(li, SNR2Function)
+    funcs.append(entry)
+    if sndata_ext_addr == 0 or sndata_ext_addr > entry.NameAddress:
+      sndata_ext_addr = entry.NameAddress
+
+  li.seek(snr_header.RelocTableAddress)
+  relocs = []
+  for i in range(0, snr_header.RelocTableCount):
+    entry = read_struct(li, SNR2Relocation)
+    relocs.append(entry)
+
   li.seek(0)
   li.file2base(0, 0, li.size(), 1)
   idaapi.add_segm(0, 0, 0x100, ".sndata", "DATA")
   idaapi.add_segm(0, 0x100, sndata_ext_addr, ".text", "CODE")
   idaapi.add_segm(0, sndata_ext_addr, li.size(), ".sndata2", "DATA")
    # some reason IDA tends to turn first few bytes of sndata_ext_addr to code, why?
-    
-  print("found " + str(len(table2)))
-  # names = []
-  for ent in table2:
-    li.seek(ent.NameOffset)
+
+  print("found " + str(len(funcs)))
+  names = []
+  for ent in funcs:
+    li.seek(ent.NameAddress)
     name = li.getz(256)
-   #  names.append(name)
-    
-    if ent.CodeOffset == 0:
+    names.append(name)
+
+    if ent.CodeAddress == 0:
       continue
-      
-    idc.set_name(ent.CodeOffset, name)
-    
+
+    idc.set_name(ent.CodeAddress, name)
+
     if "$" not in name and "__CTOR_LIST__" not in name and "__DTOR_LIST__" not in name:
-      print(hex(ent.CodeOffset) + " = " + name + " (" + hex(ent.Unk8) + " - " + hex(ent.Type) + " - " + hex(ent.UnkB) + ")")
-      idc.add_func(ent.CodeOffset)
-    
+      #print(hex(ent.CodeAddress) + " = " + name + " (" + hex(ent.Unk8) + " - " + hex(ent.Type) + " - " + hex(ent.UnkB) + ")")
+      idc.add_func(ent.CodeAddress)
+
+  # Add comment next to any relocations with the dest function name
+  for reloc in relocs:
+    reloc_dest_name = names[reloc.FunctionIdx]
+    idc.set_cmt(reloc.CodeAddress, reloc_dest_name, 1)
+
   # Done :)
   print("[+] REL loaded, voila!")
   return 1
-  
