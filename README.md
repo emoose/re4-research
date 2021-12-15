@@ -9,6 +9,8 @@ Various modding tools & research for Resident Evil 4.
 
 * **prodg-rel.py** - IDAPython loader for PS2 "SN ProDG relocatable DLL" files, as used by the RE4 PS2 versions, will automatically name functions with whatever symbols are available in the REL.
 
+* **ProDG-SNR2.bt** - 010 Editor template for PS2 ProDG SNR2/REL files
+
 More tools may be added later on, who knows.
 
 If anything here helped you in some way, maybe consider buying me a coffee at [https://ko-fi.com/emoose](https://ko-fi.com/emoose)

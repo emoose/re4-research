@@ -1,0 +1,101 @@
+//------------------------------------------------
+//--- 010 Editor v11.0.1 Binary Template
+//
+//      File: SN ProDG relocatable EXE for PS2
+//   Authors: emoose
+//   Version: 1.0
+//   Purpose: 
+//  Category: Executable
+// File Mask: *.rel
+//  ID Bytes: 53 4E 52 32
+//   History: 
+//------------------------------------------------
+
+DisplayFormatHex();
+
+// If loading SNR2 from inside ELF .sndata section, set these to the .sndata VA/offset
+local int sndataVA = 0;
+local int sndataFileOffset = 0;
+
+long ConvertVA(long VA)
+{
+  return (VA - sndataVA) + sndataFileOffset;
+}
+
+struct SNR2Header
+{
+  /* 0x00 */ uint32 Magic;
+
+  /* 0x04 */ uint32 RelocTableAddress;
+  /* 0x08 */ uint32 RelocTableCount;
+
+  /* 0x0C */ uint32 FuncTableAddress;
+  /* 0x10 */ uint32 FuncTableCount;
+
+  /* 0x14 */ uint32 OriginalImageNameAddress;
+  /* 0x18 */ uint32 GlobalCtorsAddress;
+  /* 0x1C */ uint32 GlobalDtorsAddress;
+
+  /* 0x20 */ uint32 ExportsAddress;
+  /* 0x24 */ uint32 ExportsCount;
+  /* 0x28 */ uint32 Unk28;
+  /* 0x2C */ uint32 FileSize;
+  
+  /* 0x30 */ uint32 Unk30;
+  /* 0x34 */ uint32 UnkAddr34;
+  /* 0x38 */ uint32 UnkAddr38;
+  
+  /* 0x3C = END */
+
+  local long pos = FTell();
+  if (OriginalImageNameAddress > sndataVA)
+  {
+    FSeek(ConvertVA(OriginalImageNameAddress));
+    string OriginalImageName;
+    FSeek(pos);
+  }
+};
+
+typedef struct
+{
+  /* 0x0 */ uint32 CodeAddress;
+  /* 0x4 */ BYTE RelocType;
+  /* 0x5 */ uint16 FunctionIdx;
+  /* 0x7 */ BYTE Unk7[5];
+} SNR2Relocation<read=ReadSNR2Relocation>;
+
+typedef struct
+{
+  /* 0x0 */ uint32 NameAddress;
+  /* 0x4 */ uint32 CodeAddress;
+  /* 0x8 */ uint16 Unk8;
+  /* 0xA */ BYTE Type;
+  /* 0xB */ BYTE UnkB;
+
+  local long pos = FTell();
+  FSeek(ConvertVA(NameAddress));
+  string Name<optimize=false>;
+  FSeek(pos);
+} SNR2Function<read=ReadSNR2Function>;
+
+FSeek(sndataFileOffset);
+
+SNR2Header Header;
+
+FSeek(ConvertVA(Header.RelocTableAddress));
+SNR2Relocation Relocations[Header.RelocTableCount];
+
+FSeek(ConvertVA(Header.FuncTableAddress));
+SNR2Function Functions[Header.FuncTableCount]<optimize=false>;
+
+string ReadSNR2Function(SNR2Function& func)
+{
+  return func.Name;
+}
+
+string ReadSNR2Relocation(SNR2Relocation& reloc)
+{
+  string s;
+  SPrintf(s, "0x%x -> %s", reloc.CodeAddress, Functions[reloc.FunctionIdx].Name);
+  return s;
+}
