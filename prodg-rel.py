@@ -18,6 +18,7 @@ import ida_name
 import struct
 import ctypes
 import os
+from enum import Enum
 
 _MAGIC_SNR2 = "SNR2"
 _FORMAT_SNR2 = "SN ProDG relocatable DLL"
@@ -82,6 +83,18 @@ class SNR2Function(MyStructure):
     ("Type", uint8_t),
     ("UnkB", uint8_t),
   ]
+  
+# MIPS relocation types, from ELF format
+# (only seen 4/5/6 being used by ProDG so far)
+# theres 200+ of these, hopefully not all are used by ProDG: https://code.woboq.org/llvm/llvm/include/llvm/BinaryFormat/ELFRelocs/Mips.def.html
+class MIPSRelocationType(Enum):
+  NONE = 0
+  _16 = 1
+  _32 = 2
+  REL32 = 3
+  _26 = 4
+  HI16 = 5
+  LO16 = 6
 
 def read_struct(li, struct):
   s = struct()
@@ -198,18 +211,18 @@ def load_file(li, neflags, format):
       reloc_dest_impidx = imports[reloc_dest_name]
       reloc_dest_addr = import_seg_addr + (reloc_dest_impidx * 4)
 
-      if reloc.RelocType == 4: # 24-bit address
+      if reloc.RelocType == MIPSRelocationType._26.value: # 26-bit address?
         reloc_dest_addr = int(reloc_dest_addr / 4)
         reloc_orig_dword = ida_bytes.get_dword(reloc.CodeAddress)
         reloc_new_opcode = reloc_orig_dword | reloc_dest_addr
         ida_bytes.patch_dword(reloc.CodeAddress, reloc_new_opcode)
 
-      elif reloc.RelocType == 5: # upper 16-bits, plus 1
+      elif reloc.RelocType == MIPSRelocationType.HI16.value: # upper 16-bits, plus 1
         reloc_upper_bits = reloc_dest_addr >> 16
         reloc_upper_bits = reloc_upper_bits + 1
         ida_bytes.patch_word(reloc.CodeAddress, reloc_upper_bits)
 
-      elif reloc.RelocType == 6: # lower 16-bits
+      elif reloc.RelocType == MIPSRelocationType.LO16.value: # lower 16-bits
         reloc_lower_bits = reloc_dest_addr & 0xFFFF
         ida_bytes.patch_word(reloc.CodeAddress, reloc_lower_bits)
 
