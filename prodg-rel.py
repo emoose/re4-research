@@ -1,6 +1,5 @@
 # IDAPython loader plugin for SN ProDG relocatable DLL files (*.REL)
-# These files begin with a SNR2 (SN Relocatable?) header, followed by lists of exported symbol names/addresses
-# (likely contains info about relocation too, and imports from the main module & other DLLs, but those aren't implemented here yet)
+# These files begin with a SNR2 (SN Relocatable?) header, followed by a list of relocations, followed by a list of function symbols & addresses
 
 # Sadly the exported symbols only cover a very small amount of the code - likely only the symbols that main & other modules might access
 # (the main module of the game also contains a SNR2 header with exported symbols, but again only covers certain parts of the code, too bad)
@@ -85,7 +84,7 @@ class SNR2Function(MyStructure):
   ]
   
 # MIPS relocation types, from ELF format
-# (only seen 4/5/6 being used by ProDG so far)
+# (only seen 2/4/5/6 being used by ProDG so far)
 # theres 200+ of these, hopefully not all are used by ProDG: https://code.woboq.org/llvm/llvm/include/llvm/BinaryFormat/ELFRelocs/Mips.def.html
 class MIPSRelocationType(Enum):
   NONE = 0
@@ -210,8 +209,11 @@ def load_file(li, neflags, format):
       reloc_dest_name = names[reloc.FunctionIdx]
       reloc_dest_impidx = imports[reloc_dest_name]
       reloc_dest_addr = import_seg_addr + (reloc_dest_impidx * 4)
+      
+      if reloc.RelocType == MIPSRelocationType._32.value: # 32-bit address
+        ida_bytes.patch_dword(reloc.CodeAddress, reloc_dest_addr)
 
-      if reloc.RelocType == MIPSRelocationType._26.value: # 26-bit address?
+      elif reloc.RelocType == MIPSRelocationType._26.value: # 26-bit address?
         reloc_dest_addr = int(reloc_dest_addr / 4)
         reloc_orig_dword = ida_bytes.get_dword(reloc.CodeAddress)
         reloc_new_opcode = reloc_orig_dword | reloc_dest_addr
