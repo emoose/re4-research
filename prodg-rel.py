@@ -26,6 +26,7 @@ char_t = ctypes.c_char
 uint8_t  = ctypes.c_byte
 uint16_t = ctypes.c_ushort
 uint32_t = ctypes.c_uint
+int32_t = ctypes.c_int
 
 # Debug helpers to let us print(structure)
 def StructAsString(self):
@@ -62,16 +63,14 @@ class SNR2Header(MyStructure):
     ("UnkAddr38", uint32_t)
   ]
 
-class SNR2Relocation(MyStructure):
+class Elf32_Rela(MyStructure):
   _pack_ = 1
   _fields_ = [
-    ("CodeAddress", uint32_t),
-    ("RelocType", uint8_t),
-    ("FunctionIdx", uint16_t),
-    ("Unk7", uint16_t),
-    ("Unk9", uint8_t),
-    ("UnkA", uint8_t),
-    ("UnkB", uint8_t),
+    ("r_offset", uint32_t),
+    ("r_type", uint8_t), # r_type & r_sym are combined in ELF spec as r_info, that means only 256 imports allowed?
+    ("r_sym", uint8_t),
+    ("r_addend", int32_t),
+    ("PadA", uint16_t),
   ]
 
 class SNR2Function(MyStructure):
@@ -82,7 +81,7 @@ class SNR2Function(MyStructure):
     ("Type", uint8_t),
     ("UnkB", uint8_t),
   ]
-  
+
 # MIPS relocation types, from ELF format
 # (only seen 2/4/5/6 being used by ProDG so far)
 # theres 200+ of these, hopefully not all are used by ProDG: https://code.woboq.org/llvm/llvm/include/llvm/BinaryFormat/ELFRelocs/Mips.def.html
@@ -158,7 +157,7 @@ def load_file(li, neflags, format):
   li.seek(snr_header.RelocTableAddress)
   relocs = []
   for i in range(0, snr_header.RelocTableCount):
-    entry = read_struct(li, SNR2Relocation)
+    entry = read_struct(li, Elf32_Rela)
     relocs.append(entry)
 
   li.seek(0)
@@ -183,12 +182,11 @@ def load_file(li, neflags, format):
       #print(hex(ent.CodeAddress) + " = " + name + " (" + hex(ent.Unk8) + " - " + hex(ent.Type) + " - " + hex(ent.UnkB) + ")")
       idc.add_func(ent.CodeAddress)
 
-  # Add comment next to any relocations with the dest function name
+  # Find unique reloc imports
   import_count = 0
   imports = {}
   for reloc in relocs:
-    reloc_dest_name = names[reloc.FunctionIdx]
-    idc.set_cmt(reloc.CodeAddress, reloc_dest_name, 1)
+    reloc_dest_name = names[reloc.r_sym]
 
     if reloc_dest_name not in imports:
         imports[reloc_dest_name] = import_count
@@ -206,34 +204,42 @@ def load_file(li, neflags, format):
 
     # fixup relocs
     for reloc in relocs:
-      reloc_dest_name = names[reloc.FunctionIdx]
+      reloc_dest_name = names[reloc.r_sym]
       reloc_dest_impidx = imports[reloc_dest_name]
       reloc_dest_addr = import_seg_addr + (reloc_dest_impidx * 4)
-      
-      if reloc.RelocType == MIPSRelocationType._32.value: # 32-bit address
-        ida_bytes.patch_dword(reloc.CodeAddress, reloc_dest_addr)
 
-      elif reloc.RelocType == MIPSRelocationType._26.value: # 26-bit address?
+      r_type_str = hex(reloc.r_type)
+
+      if reloc.r_type == MIPSRelocationType._32.value: # 32-bit address
+        ida_bytes.patch_dword(reloc.r_offset, reloc_dest_addr)
+
+      elif reloc.r_type == MIPSRelocationType._26.value: # 26-bit address?
         reloc_dest_addr = int(reloc_dest_addr / 4)
-        reloc_orig_dword = ida_bytes.get_dword(reloc.CodeAddress)
+        reloc_orig_dword = ida_bytes.get_dword(reloc.r_offset)
         reloc_new_opcode = reloc_orig_dword | reloc_dest_addr
-        ida_bytes.patch_dword(reloc.CodeAddress, reloc_new_opcode)
+        ida_bytes.patch_dword(reloc.r_offset, reloc_new_opcode)
 
-      elif reloc.RelocType == MIPSRelocationType.HI16.value: # upper 16-bits, plus 1
+      elif reloc.r_type == MIPSRelocationType.HI16.value: # upper 16-bits, plus 1
         reloc_upper_bits = reloc_dest_addr >> 16
         reloc_upper_bits = reloc_upper_bits + 1
-        ida_bytes.patch_word(reloc.CodeAddress, reloc_upper_bits)
+        ida_bytes.patch_word(reloc.r_offset, reloc_upper_bits)
 
-      elif reloc.RelocType == MIPSRelocationType.LO16.value: # lower 16-bits
+      elif reloc.r_type == MIPSRelocationType.LO16.value: # lower 16-bits
         reloc_lower_bits = reloc_dest_addr & 0xFFFF
-        ida_bytes.patch_word(reloc.CodeAddress, reloc_lower_bits)
+        ida_bytes.patch_word(reloc.r_offset, reloc_lower_bits)
 
       else:
-        print("[!] Unhandled reloc type " + str(reloc.RelocType) + " @ " + hex(reloc.CodeAddress) + " -> " + hex(reloc_dest_addr) + " (" + reloc_dest_name + ")")
+        r_type_str = hex(reloc.r_type) + " (UNHANDLED!)"
+        idc.set_cmt(reloc.r_offset, "r_type = " + r_type_str, 1)
+        print("[!] Unhandled reloc type " + str(reloc.r_type) + " @ " + hex(reloc.r_offset) + " -> " + hex(reloc_dest_addr) + " (" + reloc_dest_name + ")")
+
+      # comment about weird r_addend that we don't handle atm
+      if reloc.r_addend != 0:
+        idc.set_cmt(reloc.r_offset, "r_type = " + r_type_str + ", r_addend = " + hex(reloc.r_addend) + " (UNHANDLED!)", 1)
 
   # print some totals to console
   print("[+] Found " + str(len(funcs)) + " SNR2Function defs")
-  print("[+] Found " + str(len(relocs)) + " SNR2Relocation defs")
+  print("[+] Found " + str(len(relocs)) + " Elf32_Rela defs")
   if import_count > 0:
     print("[+] Found " + str(import_count) + " imports")
 
