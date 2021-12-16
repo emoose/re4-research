@@ -14,6 +14,7 @@ import ida_bytes
 import ida_loader
 import ida_typeinf
 import ida_ida
+import ida_name
 import struct
 import ctypes
 import os
@@ -99,14 +100,13 @@ def accept_file(li, n):
   return 0
 
 def load_file(li, neflags, format):
-
   if format != _FORMAT_SNR2:
     Warning("Unknown format name: '%s'" % format)
     return 0
 
   idaapi.set_processor_type("r5900l", idc.SETPROC_LOADER)
   ida_typeinf.set_compiler_id(idc.COMP_GNU)
-  
+
   im = ida_ida.compiler_info_t()
   im.id = ida_typeinf.COMP_GNU
   im.cm = 0x03 | 0x00 | 0x30
@@ -118,24 +118,24 @@ def load_file(li, neflags, format):
   im.size_l = 4
   im.size_ll = 8
   im.size_ldbl = 8
-  
+
   # Resetting new settings :)
   ida_typeinf.set_compiler(im, ida_typeinf.SETCOMP_OVERRIDE)
 
   print("[+] SN ProDG relocatable DLL loader by emoose")
-  
+
   li.seek(0)
   snr_header = read_struct(li, SNR2Header)
-  
+
   # header doesn't actually specify where code/data starts & ends, so we need to try working it our ourselves...
   sndata_ext_addr = snr_header.OriginalImageNameAddress
   if sndata_ext_addr == 0 or sndata_ext_addr > snr_header.RelocTableAddress:
     sndata_ext_addr = snr_header.RelocTableAddress
   if sndata_ext_addr == 0 or sndata_ext_addr > snr_header.FuncTableAddress:
     sndata_ext_addr = snr_header.FuncTableAddress
-  
+
   li.seek(snr_header.FuncTableAddress)
-  
+
   funcs = []
   for i in range(0, snr_header.FuncTableCount):
     entry = read_struct(li, SNR2Function)
@@ -156,7 +156,6 @@ def load_file(li, neflags, format):
   idaapi.add_segm(0, sndata_ext_addr, li.size(), ".sndata2", "DATA")
    # some reason IDA tends to turn first few bytes of sndata_ext_addr to code, why?
 
-  print("found " + str(len(funcs)))
   names = []
   for ent in funcs:
     li.seek(ent.NameAddress)
@@ -173,9 +172,55 @@ def load_file(li, neflags, format):
       idc.add_func(ent.CodeAddress)
 
   # Add comment next to any relocations with the dest function name
+  import_count = 0
+  imports = {}
   for reloc in relocs:
     reloc_dest_name = names[reloc.FunctionIdx]
     idc.set_cmt(reloc.CodeAddress, reloc_dest_name, 1)
+
+    if reloc_dest_name not in imports:
+        imports[reloc_dest_name] = import_count
+        import_count = import_count + 1
+
+  # import_count is how many unique imports there are - make a segment for them
+  import_seg_size = import_count * 4
+  import_seg_addr = int((li.size() + 3) / 4) * 4
+  if import_seg_size > 0:
+    idaapi.add_segm(1, import_seg_addr, import_seg_addr + import_seg_size, ".ref", "XTRN")
+
+    # add & name imports
+    for name, index in imports.items():
+      ida_name.force_name(import_seg_addr + (index * 4), name)
+
+    # fixup relocs
+    for reloc in relocs:
+      reloc_dest_name = names[reloc.FunctionIdx]
+      reloc_dest_impidx = imports[reloc_dest_name]
+      reloc_dest_addr = import_seg_addr + (reloc_dest_impidx * 4)
+
+      if reloc.RelocType == 4: # 24-bit address
+        reloc_dest_addr = int(reloc_dest_addr / 4)
+        reloc_orig_dword = ida_bytes.get_dword(reloc.CodeAddress)
+        reloc_new_opcode = reloc_orig_dword | reloc_dest_addr
+        ida_bytes.patch_dword(reloc.CodeAddress, reloc_new_opcode)
+
+      elif reloc.RelocType == 5: # upper 16-bits, plus 1
+        reloc_upper_bits = reloc_dest_addr >> 16
+        reloc_upper_bits = reloc_upper_bits + 1
+        ida_bytes.patch_word(reloc.CodeAddress, reloc_upper_bits)
+
+      elif reloc.RelocType == 6: # lower 16-bits
+        reloc_lower_bits = reloc_dest_addr & 0xFFFF
+        ida_bytes.patch_word(reloc.CodeAddress, reloc_lower_bits)
+
+      else:
+        print("[!] Unhandled reloc type " + str(reloc.RelocType) + " @ " + hex(reloc.CodeAddress) + " -> " + hex(reloc_dest_addr) + " (" + reloc_dest_name + ")")
+
+  # print some totals to console
+  print("[+] Found " + str(len(funcs)) + " SNR2Function defs")
+  print("[+] Found " + str(len(relocs)) + " SNR2Relocation defs")
+  if import_count > 0:
+    print("[+] Found " + str(import_count) + " imports")
 
   # Done :)
   print("[+] REL loaded, voila!")
