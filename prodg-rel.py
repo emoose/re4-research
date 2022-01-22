@@ -23,7 +23,7 @@ _MAGIC_SNR2 = "SNR2"
 _FORMAT_SNR2 = "SN ProDG relocatable DLL"
 
 char_t = ctypes.c_char
-uint8_t  = ctypes.c_byte
+uint8_t  = ctypes.c_ubyte
 uint16_t = ctypes.c_ushort
 uint32_t = ctypes.c_uint
 int32_t = ctypes.c_int
