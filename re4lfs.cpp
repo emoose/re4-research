@@ -4,6 +4,7 @@
 #include <iostream>
 #include <Windows.h>
 #include <conio.h>
+#include <io.h>
 
 typedef VOID* XMEMCOMPRESSION_CONTEXT;
 typedef VOID* XMEMDECOMPRESSION_CONTEXT;
@@ -39,6 +40,15 @@ struct LFSHeader
     uint32_t SizeDecompressed;
     uint32_t SizeCompressed;
     uint32_t NumChunks;
+
+    void endian_swap()
+    {
+      Magic1 = _byteswap_ulong(Magic1);
+      Magic2 = _byteswap_ulong(Magic2);
+      SizeDecompressed = _byteswap_ulong(SizeDecompressed);
+      SizeCompressed = _byteswap_ulong(SizeCompressed);
+      NumChunks = _byteswap_ulong(NumChunks);
+    }
 };
 
 struct LFSChunk
@@ -46,18 +56,26 @@ struct LFSChunk
     uint16_t SizeCompressed;
     uint16_t SizeDecompressed;
     uint32_t Offset;
+
+    void endian_swap()
+    {
+      SizeCompressed = _byteswap_ushort(SizeCompressed);
+      SizeDecompressed = _byteswap_ushort(SizeDecompressed);
+      Offset = _byteswap_ulong(Offset);
+    }
 };
 
 const int LFS_CHUNK_SIZE = 0x10000; // size of each decompressed chunk
 
 void usage()
 {
-    printf("Usage: RE4LFS.exe [-f] <path/to/input/file> [path/to/output/file]\n");
+    printf("Usage: RE4LFS.exe [-f] [-x] <path/to/input/file> [path/to/output/file]\n");
     printf("\nOutput file path is optional, if not specified file will be output next to the input file\n");
     printf("(either with .lfs extension added or removed)\n");
     printf("\nIf input path ends in .lfs the file will be decompressed, else will be compressed as .lfs\n");
     printf("\nIf output path exists you'll be prompted whether to overwrite or not\n");
-    printf("(use -f parameter to force overwriting without prompts)\n");
+    printf("\n-f parameter will force overwriting without prompts\n");
+    printf("-x parameter will create a big-endian LFS for X360\n");
 }
 
 int LFSCompress(FILE* in_file, FILE* out_file);
@@ -69,9 +87,11 @@ inline bool ends_with(std::string const& value, std::string const& ending)
     return std::equal(ending.rbegin(), ending.rend(), value.rbegin());
 }
 
+bool endian_swap = false;
+
 int main(int argc, const char* argv[])
 {
-    printf("RE4 LFS compression utility 1.1 - by emoose\n\n");
+    printf("RE4 LFS compression utility 1.2 - by emoose\n\n");
 
     if (argc < 2)
     {
@@ -88,6 +108,8 @@ int main(int argc, const char* argv[])
     {
         if (!_stricmp(argv[i], "-f") || !_stricmp(argv[i], "/f"))
             force_overwrite = true;
+        if (!_stricmp(argv[i], "-x") || !_stricmp(argv[i], "/x"))
+            endian_swap = true;
         else if (input_file_arg == nullptr)
             input_file_arg = argv[i];
         else
@@ -185,19 +207,28 @@ int LFSDecompress(FILE* in_file, FILE* out_file)
     LFSHeader* header = (LFSHeader*)data_in.get();
     LFSChunk* chunks = (LFSChunk*)&header[1];
 
+    if (header->Magic1 == 0x52444C58)
+    {
+        printf("Big-endian LFS detected, will byte-swap LFS headers\n");
+        endian_swap = true;
+        header->endian_swap();
+    }
+
     if (header->Magic1 != 0x584C4452) // game only checks Magic1, so guess we'll do the same
     {
         printf("Error: LFS uses invalid Magic1 0x%X (expected 0x584C4452), aborting.\n", header->Magic1);
         return 1;
     }
 
-    printf("LFS chunk count: %d\n", header->NumChunks);
+    printf("LFS chunk count: %u\n", header->NumChunks);
     printf("Writing out decompressed file...\n");
 
     auto dec_buf = std::make_unique<uint8_t[]>(LFS_CHUNK_SIZE);
     for (uint32_t i = 0; i < header->NumChunks; i++)
     {
         LFSChunk* chunk = &chunks[i];
+        if (endian_swap)
+            chunk->endian_swap();
 
         uint8_t* comp_data = (uint8_t*)chunks + (chunk->Offset & ~1); // & with ~1 to remove any 1/compressed bit
         uint32_t comp_data_size = LFS_CHUNK_SIZE;
@@ -258,12 +289,12 @@ int LFSCompress(FILE* in_file, FILE* out_file)
 
     printf("Input file length: 0x%llX\n", file_size);
 
-    int num_chunks = (file_size + (LFS_CHUNK_SIZE - 1)) / LFS_CHUNK_SIZE;
-    printf("LFS chunk count: %d\n", num_chunks);
+    uint32_t num_chunks = uint32_t((file_size + (LFS_CHUNK_SIZE - 1)) / LFS_CHUNK_SIZE);
+    printf("LFS chunk count: %u\n", num_chunks);
 
     int header_size = sizeof(LFSHeader) + (sizeof(LFSChunk) * num_chunks);
 
-    LFSHeader header;
+    LFSHeader header{};
     auto chunks = std::make_unique<LFSChunk[]>(num_chunks);
 
     header.Magic1 = 0x584C4452;
@@ -272,14 +303,18 @@ int LFSCompress(FILE* in_file, FILE* out_file)
     header.SizeDecompressed = (uint32_t)file_size;
     header.SizeCompressed = 0;
 
+    if (endian_swap)
+        printf("/x used, will byte-swap LFS headers before writing\n");
+
     printf("Writing out compressed LFS...\n");
 
     auto dec_buf = std::make_unique<uint8_t[]>(LFS_CHUNK_SIZE);
     auto comp_buf = std::make_unique<uint8_t[]>(LFS_CHUNK_SIZE);
 
+    // TODO: the weird padding stuff below is because offset is aligned minus sizeof(LFSHeader), should redo stuff to remove/add that instead
     uint64_t data_offset = header_size;
     uint64_t data_remaining = file_size;
-    for (int i = 0; i < num_chunks; i++)
+    for (uint32_t i = 0; i < num_chunks; i++)
     {
         uint64_t chunk_size = LFS_CHUNK_SIZE;
         if (chunk_size > data_remaining)
@@ -301,21 +336,41 @@ int LFSCompress(FILE* in_file, FILE* out_file)
         _fseeki64(out_file, data_offset_aligned, SEEK_SET);
         fwrite(comp_buf.get(), 1, output_size, out_file);
 
-        chunk->SizeDecompressed = chunk_size == LFS_CHUNK_SIZE ? 0 : chunk_size;
-        chunk->SizeCompressed = output_size == LFS_CHUNK_SIZE ? 0 : output_size;
+        chunk->SizeDecompressed = uint16_t(chunk_size == LFS_CHUNK_SIZE ? 0 : chunk_size);
+        chunk->SizeCompressed = uint16_t(output_size == LFS_CHUNK_SIZE ? 0 : output_size);
 
-        chunk->Offset = (data_offset_aligned - 0x14);
+        chunk->Offset = uint32_t(data_offset_aligned - 0x14);
         chunk->Offset |= 1; // set compressed bit - game won't bother with XMemDecompress if this isn't set!
 
         header.SizeCompressed += (uint32_t)output_size;
 
         data_offset = data_offset_aligned + output_size;
         data_remaining -= chunk_size;
+
+        if (endian_swap)
+        {
+          chunk->endian_swap();
+
+          // TODO: x360 includes pad bytes in the SizeCompressed field, need to check if PC also needs this
+          uint64_t next_data_offset_aligned = ((((data_offset - 4) + 0xF) / 0x10) * 0x10) + 4; // weird ass alignment based on offset being -4 of actual offset?
+          header.SizeCompressed += uint32_t(next_data_offset_aligned - data_offset);;
+        }
     }
 
     fclose(in_file);
 
     XMemDestroyCompressionContext(ctx);
+
+    if (endian_swap)
+    {
+      header.endian_swap();
+
+      // make sure to include end-of-file padding
+      // TODO: this lets us match X360, need to check if it might improve PC too
+
+      uint64_t data_offset_aligned = ((((data_offset - 4) + 0xF) / 0x10) * 0x10) + 4; // weird ass alignment based on offset being -4 of actual offset?
+      _chsize_s(_fileno(out_file), data_offset_aligned);
+    }
 
     // Write headers and finish up
     _fseeki64(out_file, 0, SEEK_SET);
