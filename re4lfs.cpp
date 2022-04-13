@@ -91,7 +91,7 @@ bool endian_swap = false;
 
 int main(int argc, const char* argv[])
 {
-    printf("RE4 LFS compression utility 1.2 - by emoose\n\n");
+    printf("RE4 LFS compression utility 1.2a - by emoose\n\n");
 
     if (argc < 2)
     {
@@ -108,7 +108,7 @@ int main(int argc, const char* argv[])
     {
         if (!_stricmp(argv[i], "-f") || !_stricmp(argv[i], "/f"))
             force_overwrite = true;
-        if (!_stricmp(argv[i], "-x") || !_stricmp(argv[i], "/x"))
+        else if (!_stricmp(argv[i], "-x") || !_stricmp(argv[i], "/x"))
             endian_swap = true;
         else if (input_file_arg == nullptr)
             input_file_arg = argv[i];
