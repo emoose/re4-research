@@ -1,0 +1,68 @@
+//------------------------------------------------
+//--- 010 Editor v11.0.1 Binary Template
+//
+//      File: GameCube relocatable executable file
+//   Authors: emoose
+//   Version: 1.0
+//   Purpose: 
+//  Category: Executable
+// File Mask: *.rel
+//  ID Bytes: 
+//   History: 
+//------------------------------------------------
+
+// Structs from Dolphin OS, strangely the PC release seems to include rel files that use little-endian variant of these (with PPC code inside)
+struct OSModuleInfo
+{
+  uint32 id;
+  uint32 next;
+  uint32 prev;
+  uint32 numSections;
+  uint32 sectionInfoOffset;
+  uint32 nameOffset;
+  uint32 nameSize;
+  uint32 version;
+};
+
+struct OSModuleHeader
+{
+  OSModuleInfo info;
+  
+  if(info.version >= 1)
+  {
+    uint32 bssSize;
+    uint32 relOffset;
+    uint32 impOffset;
+    uint32 impSize;
+    byte prologSection;
+    byte epilogSection;
+    byte unresolvedSection;
+    byte bssSection;
+    uint32 prolog;
+    uint32 epilog;
+    uint32 unresolved;
+  }
+
+  if(info.version >= 2)
+  {
+    uint32 align;
+    uint32 bssAlign;
+  }
+
+  if(info.version >= 3)
+  {
+    uint32 fixSize;
+  }
+};
+
+local long pos = FTell();
+
+// Try to guess endian format from first field, upper 8 bits shouldn't be set 
+int moduleId <hidden=true>;
+local int moduleIdTest = moduleId >> 24;
+if (moduleIdTest != 0)
+  BigEndian();
+FSeek(pos);
+
+OSModuleHeader header;
+
