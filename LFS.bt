@@ -1,0 +1,42 @@
+//------------------------------------------------
+//--- 010 Editor v11.0.1 Binary Template
+//
+//      File: LFS compressed file for BIO/RE4
+//   Authors: emoose
+//   Version: 1.0
+//   Purpose: 
+//  Category: Archive
+// File Mask: *.lfs
+//  ID Bytes: 58 4C 44 52, 52 44 4C 58
+//   History: 
+//------------------------------------------------
+
+struct LFSHead
+{
+  uint32 Magic1;
+  uint32 Magic2;
+  uint32 SizeDecompressed;
+  uint32 SizeCompressed;
+  uint32 NumChunks;
+};
+
+struct LFSChunk
+{
+  uint16 SizeCompressed;
+  uint16 SizeDecompressed;
+  uint32 Offset;
+};
+
+// Read in Magic1 field first so we can determine endian
+local long pos = FTell();
+int Magic <hidden=true>;
+FSeek(pos);
+
+if (Magic == 0x52444C58)
+{
+  Printf("Detected big-endian LFS!\n");
+  BigEndian();
+}
+
+LFSHead Header;
+LFSChunk Chunks[Header.NumChunks];
