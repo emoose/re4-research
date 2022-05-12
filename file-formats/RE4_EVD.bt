@@ -1,0 +1,124 @@
+//------------------------------------------------
+//--- 010 Editor v12.0.1 Binary Template
+//
+//      File: RE4 EVD parser
+//   Authors: emoose
+//   Version: 1.0
+//   Purpose: Parse EVD files into packet/file entry lists
+//  Category: 
+// File Mask: *.evd
+//  ID Bytes: 
+//   History: 
+//------------------------------------------------
+
+// Structure defs...
+
+struct EvdHeader
+{
+  char filePath_0[32];
+  char areaId_20[8];
+  char eventId_28[8];
+  uint32 unk_30;
+  byte unk_34[12];
+  uint32 packetStartOffset_40;
+  uint32 packetTotalSize_44;
+  uint32 fileTableCount_48;
+  uint32 fileTableOffset_4C;
+};
+
+enum<uint32> EvdPacketType
+{
+  EvdPacketType_BeginEvt = 0,
+  EvdPacketType_SetPl,
+  EvdPacketType_SetEm,
+  EvdPacketType_SetOm,
+  EvdPacketType_SetParts,
+  EvdPacketType_SetList,
+  EvdPacketType_Cam,
+  EvdPacketType_CamPos,
+  EvdPacketType_CamDammy,
+  EvdPacketType_Pos,
+  EvdPacketType_PosPl,
+  EvdPacketType_Mot,
+  EvdPacketType_Shp,
+  EvdPacketType_Esp,
+  EvdPacketType_Lit,
+  EvdPacketType_Str,
+  EvdPacketType_Se,
+  EvdPacketType_Mes,
+  EvdPacketType_Func,
+  EvdPacketType_ParentOn,
+  EvdPacketType_ParentOff,
+  EvdPacketType_EndPl,
+  EvdPacketType_EndEm,
+  EvdPacketType_EndOm,
+  EvdPacketType_EndParts,
+  EvdPacketType_EndList,
+  EvdPacketType_EndEvt,
+  EvdPacketType_EndPac,
+  EvdPacketType_SetEff,
+  EvdPacketType_Fade,
+  EvdPacketType_Fog,
+  EvdPacketType_Focus,
+  EvdPacketType_SetMdt
+};
+
+typedef struct
+{
+  EvdPacketType packetType_0;
+  uint32 unk_4;
+  uint32 unk_8;
+  uint16 packetSize_C;
+  uint16 unk_E; // seems to be idx to this packet, but sometimes skips ahead, strange
+
+  // data for the packet follows, structure depends on packet type...
+  if(packetSize_C > 0x10)
+    byte packetData_10[packetSize_C - 0x10];
+
+} EvdPacketHead<read=ReadEvdPacketHead>;
+
+string ReadEvdPacketHead(EvdPacketHead& a)
+{
+  return EnumToString(a.packetType_0);
+}
+
+typedef struct
+{
+  char name_0[0x30];
+  uint32 offset_30;
+  uint32 size_34;
+  uint32 unk_38;
+  uint32 unk_3C;
+
+  // Try reading in the data for this entry - makes it easy to save it out with File -> Save Selection
+  if(size_34 > 0)
+  {
+    local long pos = FTell();
+    FSeek(offset_30);
+    byte fileData[size_34] <optimize=false>;
+    FSeek(pos);
+  }
+} EvdFileEntry<read=ReadEvdFileEntry>;
+
+string ReadEvdFileEntry(EvdFileEntry& a)
+{
+  return a.name_0;
+}
+
+// EVD reading start!
+
+EvdHeader Header;
+
+FSeek(Header.packetStartOffset_40);
+
+local long pos = FTell();
+while(FTell() < Header.packetStartOffset_40 + Header.packetTotalSize_44)
+{
+  pos = FTell();
+  EvdPacketHead Packet;
+}
+
+// File table follows - files can be extracted by using the offset_30/size_34 fields shown for them
+
+FSeek(Header.fileTableOffset_4C);
+EvdFileEntry FileEntries[Header.fileTableCount_48] <optimize=false>;
