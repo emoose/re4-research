@@ -1,7 +1,7 @@
 # re4-research
 Various modding tools & research for Resident Evil 4.
 
-* **[IDA 7.7 database](https://github.com/emoose/re4-research/issues/3)** - IDA database for RE4 UHD (Steam) version 1.1.0, with over 70% of in-use functions named, and a few structures added.
+* **[IDA 7.7 database](https://github.com/emoose/re4-research/issues/3)** - IDA database for RE4 UHD (Steam) version 1.1.0, with over 80% of in-use functions named, and a few structures added.
 
 * **re4lfs.cpp** - (un)packer for RE4 LFS files, allowing you to compress your modded RE4 data to as little as 5% the size in best case!
 
