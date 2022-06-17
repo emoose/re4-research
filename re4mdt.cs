@@ -679,7 +679,7 @@ namespace RE4MDT
                 return;
             }
 
-            // we only want to serialize lang1 / english, the others we'll copy as they were
+            // copy unsupported langs as byte arrays, we can serialize the others
             List<Tuple<int, int>> langBlocks = new List<Tuple<int, int>>();
             List<byte[]> langData = new List<byte[]>();
             for (int i = 0; i < Languages.Count; i++)
@@ -705,21 +705,25 @@ namespace RE4MDT
             writer.BaseStream.Position = pos;
             writer.Write(langData[0]);
 
-            // write out english
-            pos = ((writer.BaseStream.Position + 0x3) / 4) * 4;
-            Header.LanguageOffsets[1] = (uint)pos;
-            writer.BaseStream.Position = pos;
-            Languages[1].Write(writer);
+            // write out supported langs
+            for (int i = (int)MesData_LanguageId.English; i < (int)MesData_LanguageId.TradChinese; i++)
+            {
+                // write out english
+                pos = ((writer.BaseStream.Position + 0x3) / 4) * 4;
+                Header.LanguageOffsets[i] = (uint)pos;
+                writer.BaseStream.Position = pos;
+                Languages[i].Write(writer);
 
-            // weird padding 1
-            writer.Write(new byte[0x10]);
+                // weird padding 1
+                writer.Write(new byte[0x10]);
 
-            // weird padding 2
-            if (Languages[1].Messages.Count > 0)
-                writer.Write(new byte[8]);
+                // weird padding 2
+                if (Languages[i].Messages.Count > 0)
+                    writer.Write(new byte[8]);
+            }
 
             // write out the rest
-            for (int i = 2; i < Languages.Count; i++)
+            for (int i = 6; i < Languages.Count; i++)
             {
                 //pos = writer.BaseStream.Position;
                 //if (langData[i].Length > 0)
