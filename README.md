@@ -5,6 +5,8 @@ Various modding tools & research for Resident Evil 4.
 
 * **re4lfs.cpp** - (un)packer for RE4 LFS files, allowing you to compress your modded RE4 data to as little as 5% the size in best case!
 
+* **re4mdt.cs** - allows converting MDT text files used by the game to readable INI files, and can apply updated INIs back on top of the MDT.
+
 * **re4resample.cpp** - tool for extracting & resampling XWB files used by RE4 (resampling low-sample-rate audio to a higher rate should improve any HRTF effects mixed into the audio)
 
 * **re4sym.cpp** - parser for SYM files included with the RE4 GC debug build, allows exporting the SYM as both IDA & Ghidra scripts
