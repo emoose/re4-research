@@ -67,6 +67,82 @@ struct LFSChunk
 
 const int LFS_CHUNK_SIZE = 0x10000; // size of each decompressed chunk
 
+struct OSModuleInfo
+{
+    uint32_t id;
+    uint32_t next;
+    uint32_t prev;
+    uint32_t numSections;
+    uint32_t sectionInfoOffset;
+    uint32_t nameOffset;
+    uint32_t nameSize;
+    uint32_t version;
+
+    void endian_swap()
+    {
+        id = _byteswap_ulong(id);
+        next = _byteswap_ulong(next);
+        prev = _byteswap_ulong(prev);
+        numSections = _byteswap_ulong(numSections);
+        sectionInfoOffset = _byteswap_ulong(sectionInfoOffset);
+        nameOffset = _byteswap_ulong(nameOffset);
+        nameSize = _byteswap_ulong(nameSize);
+        version = _byteswap_ulong(version);
+    }
+};
+
+struct OSModuleHeaderV1
+{
+    uint32_t bssSize;
+    uint32_t relOffset;
+    uint32_t impOffset;
+    uint32_t impSize;
+    uint8_t prologSection;
+    uint8_t epilogSection;
+    uint8_t unresolvedSection;
+    uint8_t bssSection;
+    uint32_t prolog;
+    uint32_t epilog;
+    uint32_t unresolved;
+
+    void endian_swap()
+    {
+        bssSize = _byteswap_ulong(bssSize);
+        relOffset = _byteswap_ulong(relOffset);
+        impOffset = _byteswap_ulong(impOffset);
+        impSize = _byteswap_ulong(impSize);
+        prolog = _byteswap_ulong(prolog);
+        epilog = _byteswap_ulong(epilog);
+        unresolved = _byteswap_ulong(unresolved);
+    }
+};
+
+struct OSModuleHeaderV2
+{
+    OSModuleHeaderV1 header_v1;
+    uint32_t align;
+    uint32_t bssAlign;
+
+    void endian_swap()
+    {
+        header_v1.endian_swap();
+        align = _byteswap_ulong(align);
+        bssAlign = _byteswap_ulong(bssAlign);
+    }
+};
+
+struct OSModuleHeaderV3
+{
+    OSModuleHeaderV2 header_v2;
+    uint32_t fixSize;
+
+    void endian_swap()
+    {
+        header_v2.endian_swap();
+        fixSize = _byteswap_ulong(fixSize);
+    }
+};
+
 void usage()
 {
     printf("Usage: RE4LFS.exe [-f] [-x] <path/to/input/file> [path/to/output/file]\n");
@@ -76,6 +152,7 @@ void usage()
     printf("\nIf output path exists you'll be prompted whether to overwrite or not\n");
     printf("\n-f parameter will force overwriting without prompts\n");
     printf("-x parameter will create a big-endian LFS for X360\n");
+    printf("-r parameter will endian-swap the DolphinOS REL header\n");
 }
 
 int LFSCompress(FILE* in_file, FILE* out_file);
@@ -88,10 +165,11 @@ inline bool ends_with(std::string const& value, std::string const& ending)
 }
 
 bool endian_swap = false;
+bool endian_swap_rel = false;
 
 int main(int argc, const char* argv[])
 {
-    printf("RE4 LFS compression utility 1.2a - by emoose\n\n");
+    printf("RE4 LFS compression utility 1.3 - by emoose\n\n");
 
     if (argc < 2)
     {
@@ -110,6 +188,8 @@ int main(int argc, const char* argv[])
             force_overwrite = true;
         else if (!_stricmp(argv[i], "-x") || !_stricmp(argv[i], "/x"))
             endian_swap = true;
+        else if (!_stricmp(argv[i], "-r") || !_stricmp(argv[i], "/r"))
+            endian_swap_rel = true;
         else if (input_file_arg == nullptr)
             input_file_arg = argv[i];
         else
@@ -263,6 +343,57 @@ int LFSDecompress(FILE* in_file, FILE* out_file)
             fwrite(comp_data, 1, comp_data_size, out_file);
         }
     }
+
+    if (endian_swap_rel)
+    {
+        printf("Endian-swapping DolphinOS REL header...\n");
+        fseek(out_file, 0, SEEK_SET);
+        OSModuleInfo moduleInfo;
+        fread(&moduleInfo, sizeof(moduleInfo), 1, out_file);
+        printf("  OSModuleInfo.id = %d\n", moduleInfo.id);
+        printf("  OSModuleInfo.version = %d\n", moduleInfo.version);
+
+        // store version field before byteswap, since it's in little-endian
+        int version = moduleInfo.version;
+        moduleInfo.endian_swap();
+        if (version > 0 && version < 4)
+        {
+            fseek(out_file, 0, SEEK_SET);
+            fwrite(&moduleInfo, sizeof(moduleInfo), 1, out_file);
+            int size = sizeof(moduleInfo);
+            if (version == 1)
+            {
+                OSModuleHeaderV1 moduleHeader;
+                fread(&moduleHeader, sizeof(moduleHeader), 1, out_file);
+                moduleHeader.endian_swap();
+                fseek(out_file, sizeof(OSModuleInfo), SEEK_SET);
+                fwrite(&moduleHeader, sizeof(moduleHeader), 1, out_file);
+            }
+            else if (version == 2)
+            {
+                OSModuleHeaderV2 moduleHeader;
+                fread(&moduleHeader, sizeof(moduleHeader), 1, out_file);
+                moduleHeader.endian_swap();
+                fseek(out_file, sizeof(OSModuleInfo), SEEK_SET);
+                fwrite(&moduleHeader, sizeof(moduleHeader), 1, out_file);
+            }
+            else if (version == 3)
+            {
+                OSModuleHeaderV3 moduleHeader;
+                fread(&moduleHeader, sizeof(moduleHeader), 1, out_file);
+                moduleHeader.endian_swap();
+                fseek(out_file, sizeof(OSModuleInfo), SEEK_SET);
+                fwrite(&moduleHeader, sizeof(moduleHeader), 1, out_file);
+            }
+
+            printf("Endian-swap complete!\n");
+        }
+        else
+        {
+            printf("Error: unknown OSModuleInfo.version value %d!\n", version);
+        }
+    }
+
     fclose(out_file);
 
     XMemDestroyDecompressionContext(ctx);
